@@ -225,6 +225,9 @@ Opcode DecodeMimgOpcode(uint32_t opcode, const MimgSampleInfo* sample, const Mim
 		case 0x09u: return Opcode::IMAGE_STORE_MIP;
 		case 0x0eu: return Opcode::IMAGE_GET_RESINFO;
 		case 0x60u: return Opcode::IMAGE_GET_LOD;
+		// image_bvh_intersect_ray and image_bvh64_intersect_ray.
+		case 0xe6u:
+		case 0xe7u: return Opcode::IMAGE_BVH_INTERSECT_RAY;
 		default: return Opcode::UNSUPPORTED;
 	}
 }
@@ -329,7 +332,10 @@ void DecodeMimg(uint32_t pc, std::span<const uint32_t> code, uint32_t word_index
 	inst.opcode_id          = opcode;
 	inst.opcode             = DecodeMimgOpcode(opcode, sample, gather, atomic);
 	inst.dmask              = (word0 >> 8u) & 0xfu;
-	inst.data_components    = gather != nullptr ? 4u : CountDmaskComponents(inst.dmask);
+	// A BVH node test always returns four dwords, whatever the dmask says.
+	inst.data_components    = gather != nullptr || inst.opcode == Opcode::IMAGE_BVH_INTERSECT_RAY
+	                              ? 4u
+	                              : CountDmaskComponents(inst.dmask);
 	inst.data_bits          = d16 ? 16u : 32u;
 	inst.data_dwords        = d16 ? (inst.data_components + 1u) / 2u : inst.data_components;
 	inst.glc                = ((word0 >> 13u) & 1u) != 0;

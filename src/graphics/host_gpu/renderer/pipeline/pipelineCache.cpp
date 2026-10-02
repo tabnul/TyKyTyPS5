@@ -127,7 +127,23 @@ void PipelineCacheLog(fmt::format_string<Args...> format, Args&&... args) {
 	Log::WriteToConsoleAndLog(message);
 }
 
+// Nothing is ever mapped below the lowest guest mapping. Shaders still walk null resource
+// pointers (an unbound descriptor table, say) and only read them under a branch that is not
+// taken; the eager SRT evaluation reads them anyway, so such reads see zeros, as on hardware.
+constexpr uint64_t kShaderNullPageEnd = 0x40000;
+
+bool ReadShaderNullPage(uint64_t address, std::span<uint32_t> values) {
+	if (address >= kShaderNullPageEnd) {
+		return false;
+	}
+	std::ranges::fill(values, 0u);
+	return true;
+}
+
 bool ReadShaderGuestMemory(void*, uint64_t address, std::span<uint32_t> values) {
+	if (!values.empty() && ReadShaderNullPage(address, values)) {
+		return true;
+	}
 	return !values.empty() &&
 	       Libs::LibKernel::Memory::TryReadGpuCleanBacking(address, values.data(), values.size_bytes());
 }
@@ -136,12 +152,18 @@ bool ReadShaderGuestMemory(void*, uint64_t address, std::span<uint32_t> values) 
 // whole page. Reading their clean bytes from the backing avoids a fault and a GPU wait; bytes
 // the GPU did write still fault and read back.
 bool ReadShaderGuestMemoryOnGpuThread(void*, uint64_t address, std::span<uint32_t> values) {
+	if (ReadShaderNullPage(address, values)) {
+		return true;
+	}
 	Libs::LibKernel::Memory::ReadGuestOnGpuThread(address, values.data(), values.size_bytes());
 	return true;
 }
 
 // A whole 64-byte block for the reads above, when each of them would be a plain copy.
 bool ReadShaderGuestBlockOnGpuThread(void*, uint64_t address, std::span<uint32_t> values) {
+	if (ReadShaderNullPage(address, values)) {
+		return true;
+	}
 	return Libs::LibKernel::Memory::TryReadGuestPlainOnGpuThread(address, values.data(),
 	                                                             values.size_bytes());
 }
@@ -152,6 +174,9 @@ bool ReadShaderGuestBlockOnGpuThread(void*, uint64_t address, std::span<uint32_t
 // through the readers above and gets the same result.
 bool ReadShaderGuestMemoryAhead(void* userdata, uint64_t address, std::span<uint32_t> values) {
 	const auto* buffers = static_cast<const BufferCache*>(userdata);
+	if (!values.empty() && ReadShaderNullPage(address, values)) {
+		return true;
+	}
 	if (values.empty() || buffers->IsPageGpuDirtyHint(address) ||
 	    buffers->IsPageGpuDirtyHint(address + values.size_bytes() - 1u)) {
 		return false;
@@ -2273,7 +2298,11 @@ uint32_t PipelineCache::PrefetchComputePipeline(const HW::Context& ctx, const HW
 	if (m_libraries == nullptr || !Config::PipelineLibrariesEnabled()) {
 		return 0;
 	}
-	const auto& cs = sh.GetCs();
+	// The shadow context only tracks register writes; the wave size comes from this dispatch's
+	// initiator (CommandProcessor::DispatchDirect applies it the same way). Without it a wave32
+	// program is translated as wave64 and its lane-mask writes clobber the next SGPR.
+	auto cs              = sh.GetCs();
+	cs.cs_regs.wave_size = Pm4::ComputeWaveSize(dispatch_initiator);
 	if (cs.cs_regs.data_addr == 0) {
 		return 0;
 	}

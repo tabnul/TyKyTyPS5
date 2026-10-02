@@ -614,6 +614,9 @@ struct CompiledResourcePlan {
 	std::vector<FlatRun>                 flat_runs;
 	std::vector<FlatRunEntry>            run_entries;
 	std::vector<uint8_t>                 in_run; // Per srt_reads entry; empty without runs.
+	// Per srt_reads entry: the value depends on a Fail node (a loop-carried address, say), so it
+	// can never be evaluated ahead of the dispatch. A refresh reads such a slot as zero.
+	std::vector<uint8_t>                 unplannable;
 	std::vector<std::array<uint32_t, 8>> descriptors; // Nodes per descriptor source dword.
 	// Per descriptor source dword: the flat SRT offset when the dword is exactly a slot that the
 	// ordinary walker reads (so its value is already in the refreshed flat buffer), else NoNode.

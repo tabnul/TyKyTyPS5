@@ -412,9 +412,8 @@ void DecodeProgram(std::span<const uint32_t> code, Program& program) {
 
 		const auto& inst = program.instructions.back();
 		word_index += inst.word_count;
-		if (inst.family == Family::MIMG && (inst.opcode_id == 0xe6u || inst.opcode_id == 0xe7u)) {
+		if (inst.opcode == Opcode::IMAGE_BVH_INTERSECT_RAY) {
 			program.has_bvh = true;
-			return;
 		}
 
 		if (IsDirectBranch(inst.opcode)) {
@@ -592,7 +591,8 @@ std::string InstructionToString(const Instruction& inst) {
 		case Opcode::IMAGE_GATHER4_LZ_O:
 		case Opcode::IMAGE_GATHER4_C_O:
 		case Opcode::IMAGE_GATHER4_C_LZ_O:
-		case Opcode::IMAGE_GATHER4H: return WithUnsupportedReason(inst, FormatMimg(inst));
+		case Opcode::IMAGE_GATHER4H:
+		case Opcode::IMAGE_BVH_INTERSECT_RAY: return WithUnsupportedReason(inst, FormatMimg(inst));
 		case Opcode::S_LOAD_DWORD:
 		case Opcode::S_LOAD_DWORDX2:
 		case Opcode::S_LOAD_DWORDX4:

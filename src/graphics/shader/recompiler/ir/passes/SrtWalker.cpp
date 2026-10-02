@@ -1438,6 +1438,52 @@ void BuildFlatRuns(const ResourcePlan& program, CompiledResourcePlan& compiled) 
 	}
 }
 
+// Marks the slots whose value graph reaches a Fail node. A scalar read in a loop that walks memory
+// (a ray tracing shader's BVH traversal, say) gets a phi-dependent address the plan cannot
+// evaluate; such a slot is only correct if the shader never reaches that read.
+void AnalyzeUnplannable(CompiledResourcePlan& compiled) {
+	// 0: unvisited, 1: in progress or clean, 2: reaches a Fail node.
+	std::vector<uint8_t> state(compiled.nodes.size(), 0u);
+	const auto reaches_fail = [&](uint32_t root) {
+		if (state[root] != 0u) {
+			return state[root] == 2u;
+		}
+		// Iterative post-order: a node is final once all of its arguments are.
+		state[root] = 1u;
+		std::vector<std::pair<uint32_t, uint32_t>> frames {{root, 0u}};
+		while (!frames.empty()) {
+			auto& [index, next] = frames.back();
+			const auto& node   = compiled.nodes[index];
+			if (node.op == NodeOp::Fail) {
+				state[index] = 2u;
+			}
+			if (state[index] != 2u && next < node.args.size()) {
+				const auto arg = node.args[next++];
+				if (arg == ResourceNode::NoNode) {
+					continue;
+				}
+				if (state[arg] == 0u) {
+					state[arg] = 1u;
+					frames.emplace_back(arg, 0u);
+				} else if (state[arg] == 2u) {
+					state[index] = 2u;
+				}
+				continue;
+			}
+			const auto done = index;
+			frames.pop_back();
+			if (state[done] == 2u && !frames.empty()) {
+				state[frames.back().first] = 2u;
+			}
+		}
+		return state[root] == 2u;
+	};
+	compiled.unplannable.assign(compiled.slots.size(), 0u);
+	for (uint32_t slot = 0; slot < compiled.slots.size(); slot++) {
+		compiled.unplannable[slot] = reaches_fail(compiled.slots[slot]) ? 1u : 0u;
+	}
+}
+
 } // namespace
 
 void SetFlatRunReads(bool enabled) {
@@ -1500,6 +1546,7 @@ const CompiledResourcePlan& CompileResourcePlan(const ResourcePlan& program) {
 	}
 	AnalyzeControlFlow(program, *compiled);
 	AnalyzeMemo(program, *compiled);
+	AnalyzeUnplannable(*compiled);
 	BuildFlatRuns(program, *compiled);
 	program.compiled = std::move(compiled);
 	return *program.compiled;
@@ -2054,8 +2101,12 @@ bool SrtEvaluator::RefreshFlatBuffer(std::vector<uint32_t>& flat) {
 		}
 		for (uint32_t index = 0; index < info.count; index++) {
 			const auto slot = m_compiled.run_entries[info.first + index].slot;
-			if (!Evaluate(m_compiled.slots[slot], flat[m_program.srt_reads[slot].flat_offset])) {
-				return false;
+			auto&      word = flat[m_program.srt_reads[slot].flat_offset];
+			if (!Evaluate(m_compiled.slots[slot], word)) {
+				if (m_compiled.unplannable[slot] == 0u) {
+					return false;
+				}
+				word = 0;
 			}
 		}
 	}
@@ -2071,8 +2122,15 @@ bool SrtEvaluator::RefreshFlatBuffer(std::vector<uint32_t>& flat) {
 			return false;
 		}
 		auto& evaluator = clean ? *m_clean_evaluator : *this;
-		if (offset >= flat.size() || !evaluator.Evaluate(m_compiled.slots[slot], flat[offset])) {
+		if (offset >= flat.size()) {
 			return false;
+		}
+		if (!evaluator.Evaluate(m_compiled.slots[slot], flat[offset])) {
+			// See CompiledResourcePlan::unplannable.
+			if (m_compiled.unplannable[slot] == 0u) {
+				return false;
+			}
+			flat[offset] = 0;
 		}
 	}
 	// Only this walker's own contexts use the shortcut; nested EXEC walkers evaluate normally.

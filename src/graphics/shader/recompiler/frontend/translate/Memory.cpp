@@ -655,6 +655,17 @@ void Translator::IMAGE_GET_LOD(const Decoder::Instruction& inst) {
 	WriteImageComponents(inst.dst, result, memory, 2u);
 }
 
+// Ray tracing is not implemented, so every BVH node test reports a miss. A box node returns
+// four child pointers and 0xffffffff marks an empty slot, so traversal pushes nothing and
+// ends; a triangle node's distance becomes NaN, which no hit test accepts. Shaders that
+// trace rays then see an empty scene (no shadow, no occlusion, no reflection hit) and still
+// produce the rest of their output, instead of the whole dispatch being dropped.
+void Translator::IMAGE_BVH_INTERSECT_RAY(const Decoder::Instruction& inst) {
+	for (uint32_t index = 0; index < 4u; index++) {
+		WriteOperand(OffsetOperand(inst.dst, index), IR::Value(0xffffffffu));
+	}
+}
+
 void Translator::IMAGE_LOAD(const Decoder::Instruction& inst) {
 	const auto memory   = MemoryInfoFromDecoded(inst);
 	const auto resource = GetImageResource(memory);
@@ -1067,6 +1078,7 @@ void Translator::EmitMemory(const Decoder::Instruction& inst) {
 		case Decoder::Opcode::IMAGE_GATHER4_C_O:
 		case Decoder::Opcode::IMAGE_GATHER4_C_LZ_O:
 		case Decoder::Opcode::IMAGE_GATHER4H: return IMAGE_GATHER(inst);
+		case Decoder::Opcode::IMAGE_BVH_INTERSECT_RAY: return IMAGE_BVH_INTERSECT_RAY(inst);
 
 		case Decoder::Opcode::DS_MIN_F32:
 			return DS_MINMAX_F32(inst, IR::ValueOpcode::SharedAtomicFMin32);
