@@ -65,6 +65,8 @@ struct SpirvRequirements {
 	bool compute_derivatives          = false;
 	bool image_gather_extended        = false;
 	bool function_lds                 = false;
+	// Size of the per-invocation LDS array: the highest address the shader can touch.
+	uint32_t function_lds_dwords      = 0;
 	bool function_scratch             = false;
 	bool pixel_valid_mask             = false;
 	bool buffer_int64_atomics         = false;

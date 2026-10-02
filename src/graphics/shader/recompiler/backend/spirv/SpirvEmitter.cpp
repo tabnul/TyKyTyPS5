@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <array>
+#include <optional>
 
 namespace Libs::Graphics::ShaderRecompiler::Spirv {
 
@@ -187,6 +188,84 @@ void ValidateNativeProgram(const IR::Program& program) {
 	}
 }
 
+// The largest value an LDS byte address can take, if it is statically bounded.
+std::optional<uint64_t> AddressBound(const IR::Value& value, int depth) {
+	const auto resolved = value.Resolve();
+	if (resolved.IsImmediate()) {
+		return resolved.GetType() == IR::Type::U32 ? std::optional<uint64_t> {resolved.U32()}
+		                                           : std::nullopt;
+	}
+	const auto* inst = resolved.TryInstruction();
+	if (inst == nullptr || depth == 0) {
+		return std::nullopt;
+	}
+	const auto arg = [&](size_t i) { return AddressBound(inst->Arg(i), depth - 1); };
+	std::optional<uint64_t> bound;
+	switch (inst->GetOpcode()) {
+		case IR::ValueOpcode::LaneId: return 63u;
+		case IR::ValueOpcode::IAdd32: {
+			const auto a = arg(0);
+			const auto b = arg(1);
+			if (a && b) {
+				bound = *a + *b;
+			}
+			break;
+		}
+		case IR::ValueOpcode::IMul32: {
+			const auto a = arg(0);
+			const auto b = arg(1);
+			if (a && b) {
+				bound = *a * *b;
+			}
+			break;
+		}
+		case IR::ValueOpcode::ShiftLeftLogical32: {
+			const auto a = arg(0);
+			const auto b = arg(1);
+			if (a && b && *b < 32u) {
+				bound = *a << *b;
+			}
+			break;
+		}
+		case IR::ValueOpcode::ShiftRightLogical32: bound = arg(0); break;
+		case IR::ValueOpcode::BitwiseAnd32: {
+			const auto a = arg(0);
+			const auto b = arg(1);
+			if (a && b) {
+				bound = std::min(*a, *b);
+			} else {
+				bound = a ? a : b;
+			}
+			break;
+		}
+		case IR::ValueOpcode::BitwiseOr32: {
+			const auto a = arg(0);
+			const auto b = arg(1);
+			if (a && b) {
+				bound = *a + *b;
+			}
+			break;
+		}
+		default: break;
+	}
+	// An address that can wrap is not bounded.
+	return bound && *bound <= UINT32_MAX ? bound : std::nullopt;
+}
+
+// LDS outside compute and mesh becomes a private array per invocation. A fixed 32 KiB array for
+// every pixel or vertex exhausts the host's local memory (NVIDIA: device lost), so it covers only
+// the addresses the shader can reach, typically a small per-lane spill area.
+uint32_t FunctionLdsDwords(const IR::Inst& inst, uint32_t offset) {
+	constexpr uint32_t Fallback      = 8192u;
+	constexpr uint64_t MaxAccessSize = 16u;
+	const auto         bound         = AddressBound(inst.Arg(0), 16);
+	if (!bound) {
+		return Fallback;
+	}
+	const auto end = *bound + offset + MaxAccessSize;
+	return static_cast<uint32_t>(std::min<uint64_t>((end + 3u) / 4u, Fallback));
+}
+
 } // namespace
 
 Emitter::SpirvRequirements Emitter::AnalyzeProgramRequirements(const IR::Program& program) {
@@ -254,6 +333,9 @@ Emitter::SpirvRequirements Emitter::AnalyzeProgramRequirements(const IR::Program
 				if (program.stage != ShaderType::Compute && program.stage != ShaderType::Mesh &&
 				    kind == IR::ResourceKind::Lds) {
 					requirements.function_lds = true;
+					requirements.function_lds_dwords =
+					    std::max(requirements.function_lds_dwords,
+					             FunctionLdsDwords(inst, program.memory_info[index].offset));
 				}
 				if (shared_access == IR::SharedAccess::Append ||
 				    shared_access == IR::SharedAccess::Consume) {
