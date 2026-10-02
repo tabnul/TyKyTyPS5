@@ -590,6 +590,13 @@ static vk::Device VulkanCreateDevice(GraphicContext& graphics,
 		pipeline_library.pNext    = supported_features2.pNext;
 		supported_features2.pNext = &pipeline_library;
 	}
+	const bool device_fault_extension =
+	    HasExtension(device_extensions, VK_EXT_DEVICE_FAULT_EXTENSION_NAME);
+	vk::PhysicalDeviceFaultFeaturesEXT device_fault {};
+	if (device_fault_extension) {
+		device_fault.pNext        = supported_features2.pNext;
+		supported_features2.pNext = &device_fault;
+	}
 	physical_device.getFeatures2(&supported_features2);
 
 	auto features12 = WindowContext::RequiredVulkan12Features();
@@ -798,7 +805,13 @@ static vk::Device VulkanCreateDevice(GraphicContext& graphics,
 		executable_properties.pNext = const_cast<void*>(create_info.pNext);
 		create_info.pNext           = &executable_properties;
 	}
-	create_info.pQueueCreateInfos       = &queue_create_info;
+	graphics.device_fault_enabled = device_fault_extension && device_fault.deviceFault;
+	if (graphics.device_fault_enabled) {
+		device_fault.pNext                   = const_cast<void*>(create_info.pNext);
+		device_fault.deviceFaultVendorBinary = VK_FALSE;
+		create_info.pNext                    = &device_fault;
+	}
+	create_info.pQueueCreateInfos      = &queue_create_info;
 	create_info.queueCreateInfoCount    = 1;
 	create_info.enabledExtensionCount   = static_cast<uint32_t>(device_extensions.size());
 	create_info.ppEnabledExtensionNames = device_extensions.data();
@@ -1178,6 +1191,19 @@ void WindowContext::CreateVulkan() {
 		    HasExtension(available_extensions,
 		                 VK_KHR_PIPELINE_EXECUTABLE_PROPERTIES_EXTENSION_NAME)) {
 			device_extensions.push_back(VK_KHR_PIPELINE_EXECUTABLE_PROPERTIES_EXTENSION_NAME);
+		}
+		// Debugging aid: checkpoints at each marked draw and dispatch, read back on device loss
+		// (see gpuCheckpoints.h).
+		if (std::getenv("KYTY_GPU_CHECKPOINTS") != nullptr &&
+		    HasExtension(available_extensions,
+		                 VK_NV_DEVICE_DIAGNOSTIC_CHECKPOINTS_EXTENSION_NAME)) {
+			device_extensions.push_back(VK_NV_DEVICE_DIAGNOSTIC_CHECKPOINTS_EXTENSION_NAME);
+			graphic_ctx.checkpoints_enabled = true;
+		}
+		// With it, the fault the device was lost on (a page fault's address), when it had one.
+		if (std::getenv("KYTY_GPU_CHECKPOINTS") != nullptr &&
+		    HasExtension(available_extensions, VK_EXT_DEVICE_FAULT_EXTENSION_NAME)) {
+			device_extensions.push_back(VK_EXT_DEVICE_FAULT_EXTENSION_NAME);
 		}
 		if (HasExtension(available_extensions,
 		                 VK_EXT_ATTACHMENT_FEEDBACK_LOOP_LAYOUT_EXTENSION_NAME)) {

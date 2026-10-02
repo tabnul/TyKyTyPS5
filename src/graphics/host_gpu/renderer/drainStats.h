@@ -80,6 +80,8 @@ enum class Zone : uint8_t {
 	Count,
 };
 
+[[nodiscard]] const char* ZoneLabel(Zone zone);
+
 struct ZoneSample {
 	Zone     zone;
 	uint64_t key;

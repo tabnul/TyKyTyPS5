@@ -7,6 +7,7 @@
 #include "graphics/host_gpu/renderer/commandHooks.h"
 #include "graphics/host_gpu/renderer/debug.h"
 #include "graphics/host_gpu/renderer/drainStats.h"
+#include "graphics/host_gpu/renderer/gpuCheckpoints.h"
 #include "graphics/host_gpu/renderer/gpuZones.h"
 #include "graphics/host_gpu/vulkanCommon.h"
 
@@ -666,6 +667,17 @@ void CommandScheduler::QueueSubmit(SubmitJob& job) {
 		                  job.debug_arg4);
 	}
 	EXIT_NOT_IMPLEMENTED(result != vk::Result::eSuccess);
+	m_master.RecordSubmit({
+	    .tick         = job.tick,
+	    .debug_op     = job.debug_op,
+	    .debug_submit = job.debug_submit,
+	    .debug_arg0   = job.debug_arg0,
+	    .debug_arg1   = job.debug_arg1,
+	    .debug_arg2   = job.debug_arg2,
+	    .debug_arg3   = job.debug_arg3,
+	    .debug_arg4   = job.debug_arg4,
+	    .pm4_op       = job.pm4_op,
+	});
 }
 
 void CommandScheduler::EnableAsyncSubmit() {
@@ -683,6 +695,7 @@ void CommandScheduler::EnableAsyncSubmit() {
 		GpuZones::g_context = this;
 		GpuZones::g_marker  = &MarkZoneThunk;
 	}
+	GpuCheckpoints::Install(m_graphics);
 	m_submit_thread = std::jthread([this](std::stop_token stop) { SubmitThread(stop); });
 }
 

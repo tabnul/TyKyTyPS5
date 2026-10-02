@@ -4,7 +4,9 @@
 #include "common/common.h"
 #include "graphics/host_gpu/vulkanCommon.h"
 
+#include <array>
 #include <atomic>
+#include <mutex>
 
 namespace Libs::Graphics {
 
@@ -12,6 +14,20 @@ struct GraphicContext;
 
 class MasterSemaphore {
 public:
+	// Debug state of a submitted command buffer, kept for the fatal report of a failed wait
+	// (a lost device): the submissions still in flight are the ones the GPU died on.
+	struct SubmitRecord {
+		uint64_t tick         = 0;
+		uint32_t debug_op     = 0;
+		uint64_t debug_submit = 0;
+		uint32_t debug_arg0   = 0;
+		uint32_t debug_arg1   = 0;
+		uint32_t debug_arg2   = 0;
+		uint32_t debug_arg3   = 0;
+		uint64_t debug_arg4   = 0;
+		uint32_t pm4_op       = 0;
+	};
+
 	explicit MasterSemaphore(GraphicContext& graphics);
 	~MasterSemaphore();
 	KYTY_CLASS_NO_COPY(MasterSemaphore);
@@ -30,12 +46,19 @@ public:
 
 	void Refresh();
 	void Wait(uint64_t tick);
+	void RecordSubmit(const SubmitRecord& record);
 
 private:
-	GraphicContext&       m_graphics;
-	vk::Semaphore         m_semaphore = nullptr;
-	std::atomic<uint64_t> m_gpu_tick {0};
-	std::atomic<uint64_t> m_current_tick {1};
+	static constexpr size_t RecordSlots = 64;
+
+	void Fail(const char* what, vk::Result result, uint64_t tick);
+
+	GraphicContext&                         m_graphics;
+	vk::Semaphore                           m_semaphore = nullptr;
+	std::atomic<uint64_t>                   m_gpu_tick {0};
+	std::atomic<uint64_t>                   m_current_tick {1};
+	std::mutex                              m_record_mutex;
+	std::array<SubmitRecord, RecordSlots>   m_records {};
 };
 
 } // namespace Libs::Graphics

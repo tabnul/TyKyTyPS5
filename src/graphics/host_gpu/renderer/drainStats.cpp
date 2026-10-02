@@ -158,24 +158,6 @@ const char* ReasonName(Reason reason) {
 	return "?";
 }
 
-const char* ZoneName(Zone zone) {
-	switch (zone) {
-		case Zone::Unmarked: return "unmarked";
-		case Zone::GameDraw: return "game-draw";
-		case Zone::GameDrawPredicated: return "game-draw-pred";
-		case Zone::GameDispatch: return "game-dispatch";
-		case Zone::MeshArgs: return "mesh-args";
-		case Zone::Tiler: return "tiler";
-		case Zone::DccClear: return "dcc-clear";
-		case Zone::FaultBuffer: return "fault-buffer";
-		case Zone::Blit: return "blit";
-		case Zone::ImageCopy: return "image-copy";
-		case Zone::BufferCopy: return "buffer-copy";
-		case Zone::Count: break;
-	}
-	return "?";
-}
-
 // GPU time per frame by zone, then the costliest zone keys (shader hashes for game work).
 std::string ZoneSummary(uint64_t frames) {
 	std::map<std::pair<Zone, uint64_t>, ZoneCell> zones;
@@ -200,7 +182,7 @@ std::string ZoneSummary(uint64_t frames) {
 	std::string text = fmt::format("  gpu-zones      {:.2f}ms/frame:", per_frame(all_ns));
 	for (size_t zone = 0; zone < totals.size(); zone++) {
 		if (totals[zone].count != 0) {
-			text += fmt::format(" {}={:.2f}ms/{:.0f}", ZoneName(static_cast<Zone>(zone)),
+			text += fmt::format(" {}={:.2f}ms/{:.0f}", ZoneLabel(static_cast<Zone>(zone)),
 			                    per_frame(totals[zone].ns),
 			                    static_cast<double>(totals[zone].count) /
 			                        static_cast<double>(frames));
@@ -214,7 +196,7 @@ std::string ZoneSummary(uint64_t frames) {
 		const auto& [key, cell] = rows[i];
 		text += fmt::format("  gpu-zone       {:<14} key={:016x} {:6.3f}ms/frame n/frame={:.1f} "
 		                    "avg={:.1f}us",
-		                    ZoneName(key.first), key.second, per_frame(cell.ns),
+		                    ZoneLabel(key.first), key.second, per_frame(cell.ns),
 		                    static_cast<double>(cell.count) / static_cast<double>(frames),
 		                    static_cast<double>(cell.ns) / 1e3 / static_cast<double>(cell.count));
 		// Draws: the render area per run and the cost per million pixels of it, which stay
@@ -496,6 +478,24 @@ void Run(std::stop_token stop, uint32_t interval_seconds) {
 }
 
 } // namespace
+
+const char* ZoneLabel(Zone zone) {
+	switch (zone) {
+		case Zone::Unmarked: return "unmarked";
+		case Zone::GameDraw: return "game-draw";
+		case Zone::GameDrawPredicated: return "game-draw-pred";
+		case Zone::GameDispatch: return "game-dispatch";
+		case Zone::MeshArgs: return "mesh-args";
+		case Zone::Tiler: return "tiler";
+		case Zone::DccClear: return "dcc-clear";
+		case Zone::FaultBuffer: return "fault-buffer";
+		case Zone::Blit: return "blit";
+		case Zone::ImageCopy: return "image-copy";
+		case Zone::BufferCopy: return "buffer-copy";
+		case Zone::Count: break;
+	}
+	return "?";
+}
 
 void Start(uint32_t interval_seconds) {
 	if (interval_seconds == 0 || g_reporter.joinable()) {

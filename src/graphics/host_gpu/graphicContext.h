@@ -41,6 +41,10 @@ struct GraphicContext {
 	bool                               pipeline_library_fast_linking         = false;
 	// VK_KHR_pipeline_executable_properties, enabled only for KYTY_DEBUG_PIPELINE_STATS.
 	bool                               pipeline_executable_info_enabled      = false;
+	// VK_NV_device_diagnostic_checkpoints, enabled only for KYTY_GPU_CHECKPOINTS.
+	bool                               checkpoints_enabled                   = false;
+	// VK_EXT_device_fault, likewise.
+	bool                               device_fault_enabled                  = false;
 	bool                               supports_block_texel_view              = false;
 	// Storage buffer word accesses leave their range check to robustBufferAccess2, and storage
 	// buffer ranges are rounded down to whole dwords (see
