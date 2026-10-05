@@ -1233,6 +1233,18 @@ uint32_t FindSelectionMerge(const Graph& graph, const BasicBlock& block) {
 	    IsInsideLoopConstruct(graph, *loop, true_target)) {
 		return false_target;
 	}
+	// One arm stays in the loop body and the other is a break path inside the loop construct
+	// (IsInnermostLoopControlConditional). The break path is the merge: the body arm leaves the
+	// selection only through the loop's own break and continue edges.
+	const bool true_in_body  = Contains(loop->body_blocks, true_target);
+	const bool false_in_body = Contains(loop->body_blocks, false_target);
+	if (true_in_body != false_in_body) {
+		const auto exit_target = true_in_body ? false_target : true_target;
+		if (IsInsideLoopConstruct(graph, *loop, exit_target) &&
+		    graph.Dominates(block.id, exit_target)) {
+			return exit_target;
+		}
+	}
 	return global_merge;
 }
 
@@ -1255,7 +1267,10 @@ bool IsInnermostLoopControlConditional(const Graph& graph, const BasicBlock& blo
 	const bool true_in_body  = Contains(loop->body_blocks, true_target);
 	const bool false_in_body = Contains(loop->body_blocks, false_target);
 	if (true_in_body != false_in_body) {
-		return true;
+		// An arm that leaves the body but stays inside the loop construct is a break path that
+		// reaches the loop merge later. Branching to it is not a structured break, so the branch
+		// is a selection whose merge is that arm (FindSelectionMerge).
+		return !IsInsideLoopConstruct(graph, *loop, true_in_body ? false_target : true_target);
 	}
 	const auto is_control_target = [&](uint32_t target) {
 		return target == loop->merge || target == loop->continue_block;
