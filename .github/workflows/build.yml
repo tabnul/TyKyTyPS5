@@ -127,6 +127,8 @@ jobs:
         shell: cmd
         run: |
           cmake --install _Build/windows --prefix _Build/windows/install
+          copy /Y tools\u59-preset.json _Build\windows\install\
+          copy /Y docs\EXPERIMENTAL.md _Build\windows\install\U59-README.md
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
