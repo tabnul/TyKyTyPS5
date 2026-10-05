@@ -1389,7 +1389,13 @@ bool SrtWalker::ReadRawWord(uint64_t address, uint64_t& result, bool allow_probe
 		const bool probed = allow_probe && m_runtime.try_read_clean_backing != nullptr &&
 		    address != 0 && address < gpu_limit && sizeof(word) < gpu_limit - address &&
 		    m_runtime.try_read_clean_backing(m_runtime.userdata, address, {&word, 1});
-		if (!probed) {
+		// Nothing is mapped below the lowest guest mapping (kShaderNullPageEnd in
+		// pipelineCache.cpp). A null resource pointer plus an offset lands there and
+		// reads as zeros, as on hardware, instead of faulting the host.
+		constexpr uint64_t null_page_end = 0x40000;
+		if (!probed && address < null_page_end) {
+			word = 0;
+		} else if (!probed) {
 			std::memcpy(&word, reinterpret_cast<const void*>(address), sizeof(word));
 		}
 	}
