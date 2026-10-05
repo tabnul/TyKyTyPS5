@@ -438,7 +438,23 @@ bool NativeDccEnabled() {
 	return enabled;
 }
 
+// Nothing is ever mapped below the lowest guest mapping. Shaders still walk null resource
+// pointers (an unbound descriptor table, say) and only read them under a branch that is not
+// taken; the eager SRT evaluation reads them anyway, so such reads see zeros, as on hardware.
+constexpr uint64_t kShaderNullPageEnd = 0x40000;
+
+bool ReadShaderNullPage(uint64_t address, std::span<uint32_t> values) {
+	if (values.empty() || address >= kShaderNullPageEnd) {
+		return false;
+	}
+	std::ranges::fill(values, 0u);
+	return true;
+}
+
 bool ReadShaderGuestMemory(void* userdata, uint64_t address, std::span<uint32_t> values) {
+	if (ReadShaderNullPage(address, values)) {
+		return true;
+	}
 	const bool read = !values.empty() &&
 	    LibKernel::Memory::TryReadGpuCleanBacking(address, values.data(), values.size_bytes());
 	if (!read && userdata != nullptr) {
@@ -457,6 +473,9 @@ bool SrtReadRunsEnabled() {
 
 bool TryReadShaderCleanBacking(void*, uint64_t address, std::span<uint32_t> values) {
 	// A failed probe must not request synchronization or alter the shader retry list.
+	if (ReadShaderNullPage(address, values)) {
+		return true;
+	}
 	const bool read = !values.empty() &&
 	    LibKernel::Memory::TryReadGpuCleanBacking(address, values.data(), values.size_bytes());
 	Profiler::CountFrameEvent(read ? Profiler::FrameEvent::SrtProbeHits
@@ -2828,6 +2847,9 @@ struct PipelineCache::ProgramCache {
 	// the same bytes the serial path's strict reader and clean probe use, so a materialization
 	// that succeeds with it equals the serial one; any failure falls back to the serial path.
 	static bool SpeculativeRead(void*, uint64_t address, std::span<uint32_t> values) {
+		if (ReadShaderNullPage(address, values)) {
+			return true;
+		}
 		return !values.empty() &&
 		       LibKernel::Memory::TryReadGpuCleanBacking(address, values.data(), values.size_bytes());
 	}
